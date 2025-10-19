@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Add the backend directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from services.embedding_service import embedding_service
 from services.vector_service import vector_service
 import logging
