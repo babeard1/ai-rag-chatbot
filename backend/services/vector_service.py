@@ -168,7 +168,7 @@ class VectorService:
             logger.error(f"Unexpected error during search: {str(e)}")
             return {"success": False, "error": f"Search error: {str(e)}"}
         
-    def get_index_status(self) -> Dict[str, Any]:
+    def get_index_stats(self) -> Dict[str, Any]:
         """Get stats about the Pinecone index."""
         try:
             stats = self.index.describe_index_stats()

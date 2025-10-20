@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 # Add the backend directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+load_dotenv()
 from services.embedding_service import embedding_service
 from services.vector_service import vector_service
 import logging
@@ -81,7 +81,7 @@ def test_full_pipeline():
     
     # Step 4: Store in Pinecone
     print("💾 Storing vectors in Pinecone...")
-    store_result = vector_service.store_vectors(test_texts, embeddings, metadata_list)
+    store_result = vector_service.store_vector(test_texts, embeddings, metadata_list)
     
     if not store_result["success"]:
         print(f"❌ Failed to store vectors: {store_result['error']}")
