@@ -5,6 +5,7 @@ from config.settings import settings
 from services.pdf_service import pdf_service
 from services.embedding_service import embedding_service
 from services.vector_service import vector_service
+from services.llm_service import llm_service
 import logging
 from typing import Dict, Any
 import uvicorn
@@ -149,6 +150,102 @@ async def upload_pdf(file: UploadFile = File(...)) -> Dict[str, Any]:
             status_code=500,
             detail=f"Error processing PDF: {str(e)}"
         )
+
+@app.post("/query")
+async def query_documents(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Query the knowledge base and get an AI-generated answer.
+    
+    Args:
+        request: JSON body with "question" field
+        
+    Returns:
+        AI-generated answer with source citations
+    """
+    # Extract question from request
+    question = request.get("question", "").strip()
+    
+    if not question:
+        raise HTTPException(
+            status_code=400,
+            detail="Question is required"
+        )
+    
+    logger.info(f"Processing query: {question}")
+    
+    try:
+        # STEP 1: Convert question to embedding
+        logger.info("Step 1: Creating embedding for question...")
+        question_embedding = embedding_service.create_embedding(question)
+        
+        # STEP 2: Search Pinecone for similar chunks
+        logger.info("Step 2: Searching for relevant documents...")
+        search_result = vector_service.search_similar(
+            query_embedding=question_embedding,
+            top_k=5  # Get top 5 most relevant chunks
+        )
+        
+        if not search_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Search failed: {search_result.get('error', 'Unknown error')}"
+            )
+        
+        # Check if we found any relevant chunks
+        if not search_result["results"]:
+            return {
+                "success": True,
+                "answer": "I couldn't find any relevant information in the uploaded documents to answer your question.",
+                "sources": [],
+                "question": question
+            }
+        
+        logger.info(f"Found {len(search_result['results'])} relevant chunks")
+        
+        # STEP 3: Prepare context chunks for LLM
+        context_chunks = []
+        for result in search_result["results"]:
+            context_chunks.append({
+                "text": result["text"],
+                "metadata": result["metadata"]
+            })
+        
+        # STEP 4: Generate answer using LLM
+        logger.info("Step 3: Generating answer with LLM...")
+        llm_result = llm_service.generate_answer(
+            question=question,
+            context_chunks=context_chunks
+        )
+        
+        if not llm_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate answer: {llm_result.get('error', 'Unknown error')}"
+            )
+        
+        logger.info("Successfully generated answer")
+        
+        # Return the complete response
+        return {
+            "success": True,
+            "question": question,
+            "answer": llm_result["answer"],
+            "sources": llm_result["sources"],
+            "model": llm_result["model"],
+            "tokens_used": llm_result["usage"]["total_tokens"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error processing query: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing query: {str(e)}"
+        )
+
+
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

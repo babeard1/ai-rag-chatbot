@@ -151,7 +151,7 @@ class VectorService:
                         if key not in ["text"] # Don't duplicate text in metadata
                     }
                 }
-                results.append(results)
+                results.append(result)
 
             logger.info(f"Found {len(results)} similar vectors")
 
