@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from config.settings import settings
 from services.pdf_service import pdf_service
+from services.embedding_service import embedding_service
+from services.vector_service import vector_service
 import logging
 from typing import Dict, Any
 import uvicorn
@@ -61,20 +63,92 @@ async def upload_pdf(file: UploadFile = File(...)) -> Dict[str, Any]:
     
     logger.info(f"Processing PDF: {file.filename} ({len(file_bytes)} bytes)")
 
-    # Extract text 
-    result = pdf_service.extract_text_from_pdf(file_bytes)
+    try:
+        # STEP 1: Extract text from PDF
+        logger.info("Step 1: Extracting text from PDF...")
+        extraction_result = pdf_service.extract_text_from_pdf(file_bytes)
 
-    if not result["success"]:
+        if not extraction_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to extract text from PDF: {extraction_result.get('error', 'Unknown error')}"
+            )
+        
+        logger.info(f"Extracted {extraction_result['total_chars']} characters from {extraction_result['num_pages']} pages")
+
+        # STEP 2: Chunk the text
+        logger.info("Step 2: Chunking text...")
+        chunks = pdf_service.chunk_pages(
+            extraction_result["pages"],
+            chunk_size=500,  # ~500 characters per chunk
+            overlap=50       # 50 character overlap
+        )
+
+        if not chunks:
+            raise HTTPException(
+                status_code=400,
+                detail="No text could be extracted from PDF"
+            )
+        
+        logger.info(f"Created {len(chunks)} text chunks")
+
+        # STEP3: Create embeddings for each chunk
+        logger.info("Step 3: Creating embeddings...")
+        chunk_texts = [chunk["text"] for chunk in chunks]
+        embeddings = embedding_service.create_embeddings_batch(chunk_texts)
+        
+        logger.info(f"Created {len(embeddings)} embeddings")
+
+        # STEP 4: Prepare metadata for Pinecone DB
+        logger.info("Step 4: Preparing metadata...")
+        metadata_list = []
+        for chunk in chunks:
+            metadata = {
+                "filename": file.filename,
+                "page": chunk["page"],
+                "chunk_index": chunk["chunk_index"],
+                "total_pages": extraction_result["num_pages"]
+            }
+            metadata_list.append(metadata)
+
+        # STEP 5: Store in Pinecone
+        logger.info("Step 5: Storing vectors in Pinecone...")
+        store_result = vector_service.store_vector(
+            texts=chunk_texts,
+            embeddings=embeddings,
+            metadata_list=metadata_list
+        )
+        
+        if not store_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to store vectors: {store_result.get('error', 'Unknown error')}"
+            )
+        
+        logger.info(f"Successfully stored {store_result['upserted_count']} vectors")
+        
+        # Return success response
+        return {
+            "success": True,
+            "filename": file.filename,
+            "message": "PDF processed and indexed successfully",
+            "stats": {
+                "pages": extraction_result["num_pages"],
+                "total_chars": extraction_result["total_chars"],
+                "chunks_created": len(chunks),
+                "vectors_stored": store_result["upserted_count"]
+            }
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error processing PDF: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process PDF: {result.get('error', 'Unknown error')}"
-        ) 
-    
-    return {
-        "filename": file.filename,
-        "message": "PDF processed",
-        **result
-    }
+            detail=f"Error processing PDF: {str(e)}"
+        )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
