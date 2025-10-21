@@ -1,6 +1,9 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings(BaseSettings):
     """App settings loaded from env variables."""
@@ -19,14 +22,16 @@ class Settings(BaseSettings):
 
     allowed_origins: str = "http://localhost:3000,http://localhost:5173"
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False
+    )
+    
     # Pinecone Settings
     pinecone_api_key: str
     pinecone_index_name: str = "rag-chatbot"
     pinecone_environment: str = "us-east-1"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
     @property
     def allowed_origins_list(self) -> List[str]:
