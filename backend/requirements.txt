@@ -8,3 +8,4 @@ langchain-community==0.0.38
 sentence-transformers==2.7.0
 pinecone-client==4.1.0
 numpy==1.26.4
+groq==0.11.0
