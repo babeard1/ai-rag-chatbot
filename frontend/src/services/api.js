@@ -3,10 +3,12 @@ import axios from 'axios';
 // Determine the base URL based on environment
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
-// Create axios instance
+console.log('API Base URL:', API_BASE_URL);
+
+// Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // processing can take time
+  timeout: 120000, // 2 minutes - PDF processing can take time
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,7 +17,9 @@ const apiClient = axios.create({
 // Add request interceptor for debugging
 apiClient.interceptors.request.use(
   (config) => {
-    console.log('API Request:', config.method.toUpperCase(), config.url);
+    console.log('📤 API Request:', config.method.toUpperCase(), config.url);
+    console.log('📤 Base URL:', config.baseURL);
+    console.log('📤 Full URL:', `${config.baseURL}${config.url}`);
     return config;
   },
   (error) => {
@@ -28,10 +32,25 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => {
     console.log('API Response:', response.status, response.config.url);
+    console.log('Response data:', response.data);
     return response;
   },
   (error) => {
-    console.error('API Response Error:', error.response?.data || error.message);
+    console.error('API Response Error:', error);
+    
+    if (error.response) {
+      // Server responded with error status
+      console.error('Error response data:', error.response.data);
+      console.error('Error response status:', error.response.status);
+      console.error('Error response headers:', error.response.headers);
+    } else if (error.request) {
+      // Request was made but no response received
+      console.error('No response received:', error.request);
+    } else {
+      // Something else happened
+      console.error('Error message:', error.message);
+    }
+    
     return Promise.reject(error);
   }
 );
@@ -42,16 +61,37 @@ apiClient.interceptors.response.use(
  * @returns {Promise} - Response containing success status and document info
  */
 export const uploadDocument = async (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
 
-  const response = await apiClient.post('/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+    console.log('📤 Uploading file:', file.name, 'Size:', file.size, 'Type:', file.type);
 
-  return response.data;
+    const response = await apiClient.post('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    console.log('Upload successful:', response.data);
+    return response.data;
+    
+  } catch (error) {
+    console.error('Upload failed:', error);
+    
+    // Extract meaningful error message
+    let errorMessage = 'Upload failed';
+    
+    if (error.response?.data?.detail) {
+      errorMessage = error.response.data.detail;
+    } else if (error.response?.data?.message) {
+      errorMessage = error.response.data.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
+  }
 };
 
 /**
@@ -60,8 +100,13 @@ export const uploadDocument = async (file) => {
  * @returns {Promise} - Response containing answer and sources
  */
 export const queryDocuments = async (question) => {
-  const response = await apiClient.post('/query', { question });
-  return response.data;
+  try {
+    const response = await apiClient.post('/query', { question });
+    return response.data;
+  } catch (error) {
+    console.error('Query failed:', error);
+    throw error;
+  }
 };
 
 /**
@@ -69,8 +114,13 @@ export const queryDocuments = async (question) => {
  * @returns {Promise} - Response containing health status
  */
 export const healthCheck = async () => {
-  const response = await apiClient.get('/health');
-  return response.data;
+  try {
+    const response = await apiClient.get('/health');
+    return response.data;
+  } catch (error) {
+    console.error('Health check failed:', error);
+    throw error;
+  }
 };
 
 export default apiClient;

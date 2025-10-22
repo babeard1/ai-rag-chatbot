@@ -35,15 +35,34 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> List[str]:
-        """Convert comma-separated origins string to list."""
-        return [origin.strip() for origin in self.allowed_origins.split(",")]
-
-    # def __init__(self, **kwargs):
-    #     super().__init__(**kwargs)
+        """
+        Convert comma-separated origins string to list and add Codespaces URLs dynamically.
+        """
+        # Start with origins from .env file
+        origins = [origin.strip() for origin in self.allowed_origins.split(",")]
         
-    #     # Validate required settings
-    #     if not self.pinecone_api_key:
-    #         raise ValueError("PINECONE_API_KEY is required in .env file")    
+        # Check if running in GitHub Codespaces
+        codespace_name = os.getenv("CODESPACE_NAME")
+        
+        if codespace_name:
+            # Add Codespaces forwarded URLs automatically
+            codespaces_origins = [
+                f"https://{codespace_name}-5173.app.github.dev",  # Frontend (Vite default)
+                f"https://{codespace_name}-3000.app.github.dev",  # Alternative frontend port
+                f"https://{codespace_name}-8000.app.github.dev",  # Backend
+            ]
+            origins.extend(codespaces_origins)
+            print(f"--Codespaces detected: {codespace_name}")
+            print(f"--Added Codespaces URLs to CORS origins")
+        
+        # Add production URL if set in environment
+        production_url = os.getenv("FRONTEND_URL")
+        if production_url:
+            origins.append(production_url)
+            print(f"-Added production URL: {production_url}")
+        
+        print(f"Final CORS origins: {origins}")
+        return origins
 
 # Create global settings instance that other files can import
 settings = Settings()
