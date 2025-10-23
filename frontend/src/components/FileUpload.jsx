@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   Box,
@@ -12,20 +12,43 @@ import {
   IconButton,
   CircularProgress,
   Alert,
+  Divider,
+  Chip,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
   Description as FileIcon,
   Delete as DeleteIcon,
   CheckCircle as SuccessIcon,
+  Storage as KnowledgeIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { uploadDocument } from '../services/api';
+import { uploadDocument, listDocuments } from '../services/api';
 
 const FileUpload = ({ onUploadSuccess }) => {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+
+  // Fetch existing documents on component mount
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  const fetchDocuments = async () => {
+    setLoadingDocuments(true);
+    try {
+      const response = await listDocuments();
+      setUploadedFiles(response.documents || []);
+    } catch (err) {
+      console.error('Failed to fetch documents:', err);
+      // Don't show error to user, just log it
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
 
   // Handle file drop or selection
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
@@ -80,8 +103,10 @@ const FileUpload = ({ onUploadSuccess }) => {
       }
 
       if (successfulUploads.length > 0) {
-        setUploadedFiles(prev => [...prev, ...successfulUploads]);
         setFiles([]); // Clear the pending files
+        
+        // Refresh the document list from backend
+        await fetchDocuments();
         
         // Notify parent component
         if (onUploadSuccess) {
@@ -96,7 +121,87 @@ const FileUpload = ({ onUploadSuccess }) => {
   };
 
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box>
+      {/* Knowledge Base Status - Show this prominently at the top */}
+      {uploadedFiles.length > 0 && (
+        <Paper 
+          elevation={2}
+          sx={{ 
+            mb: 3, 
+            p: 2.5, 
+            bgcolor: 'primary.light',
+            color: 'primary.contrastText',
+            border: 2,
+            borderColor: 'primary.main',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
+            <KnowledgeIcon sx={{ mr: 1.5, fontSize: 28 }} />
+            <Box sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Active Knowledge Base
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                Chatbot can answer questions from these documents
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                label={`${uploadedFiles.length} document${uploadedFiles.length !== 1 ? 's' : ''}`}
+                sx={{ 
+                  bgcolor: 'white', 
+                  color: 'primary.main',
+                  fontWeight: 600,
+                }}
+              />
+              <IconButton
+                size="small"
+                onClick={fetchDocuments}
+                disabled={loadingDocuments}
+                sx={{ 
+                  color: 'white',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
+                }}
+                title="Refresh document list"
+              >
+                {loadingDocuments ? <CircularProgress size={20} /> : <RefreshIcon />}
+              </IconButton>
+            </Box>
+          </Box>
+          
+          <Divider sx={{ my: 1.5, bgcolor: 'white', opacity: 0.3 }} />
+          
+          <List dense disablePadding>
+            {uploadedFiles.map((file, index) => (
+              <ListItem 
+                key={index}
+                sx={{ 
+                  px: 0,
+                  py: 0.5,
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 32 }}>
+                  <FileIcon sx={{ color: 'white', fontSize: 20 }} />
+                </ListItemIcon>
+                <ListItemText
+                  primary={
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {file.filename || file.name}
+                    </Typography>
+                  }
+                  secondary={
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                      {file.total_pages ? `${file.total_pages} pages • ` : ''}
+                      {file.total_chunks || file.chunks_created || 'Unknown'} searchable chunks
+                    </Typography>
+                  }
+                />
+              </ListItem>
+            ))}
+          </List>
+        </Paper>
+      )}
+
       {/* Drop zone */}
       <Paper
         {...getRootProps()}
@@ -171,29 +276,6 @@ const FileUpload = ({ onUploadSuccess }) => {
           >
             {uploading ? 'Uploading...' : `Upload ${files.length} file(s)`}
           </Button>
-        </Paper>
-      )}
-
-      {/* Successfully uploaded files */}
-      {uploadedFiles.length > 0 && (
-        <Paper sx={{ mt: 2, p: 2, bgcolor: 'success.light', color: 'success.contrastText' }}>
-          <Typography variant="subtitle1" gutterBottom>
-            Successfully uploaded ({uploadedFiles.length})
-          </Typography>
-          <List dense>
-            {uploadedFiles.map((file, index) => (
-              <ListItem key={index}>
-                <ListItemIcon>
-                  <SuccessIcon sx={{ color: 'success.dark' }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary={file.name}
-                  secondary={`${file.chunks_created || 'Unknown'} chunks created`}
-                  secondaryTypographyProps={{ sx: { color: 'success.dark' } }}
-                />
-              </ListItem>
-            ))}
-          </List>
         </Paper>
       )}
     </Box>

@@ -40,7 +40,7 @@ const Message = ({ message }) => {
         </Typography>
 
         {/* Source citations (only for assistant messages) */}
-        {!isUser && message.sources && message.sources.length > 0 && (
+        {/* {!isUser && message.sources && message.sources.length > 0 && (
           <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
             <Typography variant="caption" color="text.secondary" gutterBottom>
               Sources:
@@ -57,7 +57,34 @@ const Message = ({ message }) => {
               ))}
             </Stack>
           </Box>
+        )} */}
+
+        {!isUser && message.sources && message.sources.length > 0 && (
+          <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="caption" color="text.secondary" gutterBottom>
+              Sources:
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {message.sources.map((source, index) => {
+                // Handle undefined or missing page numbers
+                const pageLabel = source.page !== undefined && source.page !== null 
+                  ? `p.${source.page}` 
+                  : 'page unknown';
+                
+                return (
+                  <Chip
+                    key={index}
+                    label={`${source.source || 'Unknown'} (${pageLabel})`}
+                    size="small"
+                    variant="outlined"
+                    sx={{ mt: 0.5 }}
+                  />
+                );
+              })}
+            </Stack>
+          </Box>
         )}
+
       </Paper>
     </Box>
   );

@@ -123,4 +123,19 @@ export const healthCheck = async () => {
   }
 };
 
+/**
+ * Get list of all documents in the knowledge base
+ * @returns {Promise} - Response containing list of documents
+ */
+export const listDocuments = async () => {
+  try {
+    const response = await apiClient.get('/documents');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to list documents:', error);
+    throw error;
+  }
+};
+
+
 export default apiClient;

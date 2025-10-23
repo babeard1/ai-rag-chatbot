@@ -2,7 +2,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from config.settings import settings
-from services.pdf_service import pdf_service
+from services.pdf_service import extract_text_from_pdf, chunk_text_with_page_tracking
 from services.embedding_service import embedding_service
 from services.vector_service import vector_service
 from services.llm_service import llm_service
@@ -48,108 +48,78 @@ async def health_check():
     }
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)) -> Dict[str, Any]:
-    if not file.content_type == "application/pdf":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type. Expected PDF, got {file.content_type}"
-        )
-    
-    file_bytes = await file.read()
-    if len(file_bytes) > 10 * 1024 * 1024:  # 10MB in bytes
-        raise HTTPException(
-            status_code=400,
-            detail="File too big. Max size is 10MB."
-        )
-    
-    logger.info(f"Processing PDF: {file.filename} ({len(file_bytes)} bytes)")
-
+async def upload_document(file: UploadFile = File(...)):
+    """
+    Upload and process a PDF document.
+    Extracts text, creates embeddings, and stores in vector database.
+    """
     try:
-        # STEP 1: Extract text from PDF
-        logger.info("Step 1: Extracting text from PDF...")
-        extraction_result = pdf_service.extract_text_from_pdf(file_bytes)
-
-        if not extraction_result["success"]:
+        # Validate file type
+        if not file.filename.endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
+        # Save uploaded file temporarily
+        temp_file_path = f"/tmp/{file.filename}"
+        with open(temp_file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Extract text with page tracking
+        pdf_data = extract_text_from_pdf(temp_file_path)
+        
+        if not pdf_data['full_text'].strip():
             raise HTTPException(
-                status_code=500,
-                detail=f"Failed to extract text from PDF: {extraction_result.get('error', 'Unknown error')}"
+                status_code=400, 
+                detail="No text could be extracted from this PDF. It may be image-based or empty."
             )
         
-        logger.info(f"Extracted {extraction_result['total_chars']} characters from {extraction_result['num_pages']} pages")
-
-        # STEP 2: Chunk the text
-        logger.info("Step 2: Chunking text...")
-        chunks = pdf_service.chunk_pages(
-            extraction_result["pages"],
-            chunk_size=500,  # ~500 characters per chunk
-            overlap=50       # 50 character overlap
-        )
-
-        if not chunks:
-            raise HTTPException(
-                status_code=400,
-                detail="No text could be extracted from PDF"
-            )
+        # Chunk text while preserving page numbers
+        chunks = chunk_text_with_page_tracking(pdf_data['pages'])
         
-        logger.info(f"Created {len(chunks)} text chunks")
-
-        # STEP3: Create embeddings for each chunk
-        logger.info("Step 3: Creating embeddings...")
-        chunk_texts = [chunk["text"] for chunk in chunks]
-        embeddings = embedding_service.create_embeddings_batch(chunk_texts)
+        # Create embeddings for each chunk
+        vectors_to_upsert = []
         
-        logger.info(f"Created {len(embeddings)} embeddings")
-
-        # STEP 4: Prepare metadata for Pinecone DB
-        logger.info("Step 4: Preparing metadata...")
-        metadata_list = []
         for chunk in chunks:
+            # Create embedding
+            embedding = embedding_service.create_embedding(chunk['text'])
+            
+            # Prepare metadata
             metadata = {
-                "filename": file.filename,
-                "page": chunk["page"],
-                "chunk_index": chunk["chunk_index"],
-                "total_pages": extraction_result["num_pages"]
+                'text': chunk['text'],
+                'source': file.filename,
+                'page': chunk['page_number'],  # Now properly tracked!
+                'chunk_id': chunk['chunk_id']
             }
-            metadata_list.append(metadata)
-
-        # STEP 5: Store in Pinecone
-        logger.info("Step 5: Storing vectors in Pinecone...")
-        store_result = vector_service.store_vector(
-            texts=chunk_texts,
-            embeddings=embeddings,
-            metadata_list=metadata_list
-        )
+            
+            # Create vector ID
+            vector_id = f"{file.filename}_chunk_{chunk['chunk_id']}"
+            
+            vectors_to_upsert.append({
+                'id': vector_id,
+                'values': embedding,
+                'metadata': metadata
+            })
         
-        if not store_result["success"]:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to store vectors: {store_result.get('error', 'Unknown error')}"
-            )
+        # Store in Pinecone
+        vector_service.upsert_vectors(vectors_to_upsert)
         
-        logger.info(f"Successfully stored {store_result['upserted_count']} vectors")
+        # Clean up temp file
+        import os
+        os.remove(temp_file_path)
         
-        # Return success response
         return {
-            "success": True,
+            "message": "Document uploaded and processed successfully",
             "filename": file.filename,
-            "message": "PDF processed and indexed successfully",
-            "stats": {
-                "pages": extraction_result["num_pages"],
-                "total_chars": extraction_result["total_chars"],
-                "chunks_created": len(chunks),
-                "vectors_stored": store_result["upserted_count"]
-            }
+            "total_pages": pdf_data['total_pages'],
+            "chunks_created": len(chunks),
+            "pages_with_text": len(pdf_data['pages'])
         }
         
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing PDF: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing PDF: {str(e)}"
-        )
+        logger.error(f"Error processing upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
 @app.post("/query")
 async def query_documents(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -244,7 +214,78 @@ async def query_documents(request: Dict[str, Any]) -> Dict[str, Any]:
             detail=f"Error processing query: {str(e)}"
         )
 
+@app.get("/documents")
+async def list_documents():
+    """
+    List all documents currently stored in the vector database.
+    Returns unique document names with their metadata.
+    """
+    try:
+        from services.vector_service import vector_service
+        
+        # Query Pinecone to get all unique document sources
 
+        # Get stats from Pinecone index
+        stats = vector_service.index.describe_index_stats()
+        total_vectors = stats.get('total_vector_count', 0)
+        
+        if total_vectors == 0:
+            return {
+                "documents": [],
+                "total_documents": 0,
+                "total_chunks": 0
+            }
+        
+        # Fetch all vectors to get unique sources
+        # Note: Pagination for production
+        all_vectors = vector_service.index.query(
+            vector=[0] * 384,  # Dummy vector
+            top_k=min(total_vectors, 10000),  # Limit to prevent timeout
+            include_metadata=True
+        )
+        
+        # Extract unique documents
+        documents_map = {}
+        
+        for match in all_vectors.get('matches', []):
+            metadata = match.get('metadata', {})
+            source = metadata.get('filename') or metadata.get('source', 'Unknown')
+            
+            if source not in documents_map:
+                documents_map[source] = {
+                    'filename': source,
+                    'chunks': 0,
+                    'pages': set()
+                }
+            
+            documents_map[source]['chunks'] += 1
+            
+            # Track unique pages
+            page = metadata.get('page')
+            if page is not None:
+                documents_map[source]['pages'].add(page)
+        
+        # Convert to list format
+        documents = []
+        for source, data in documents_map.items():
+            documents.append({
+                'filename': data['filename'],
+                'total_chunks': data['chunks'],
+                'total_pages': len(data['pages']) if data['pages'] else None
+            })
+        
+        # Sort by filename
+        documents.sort(key=lambda x: x['filename'])
+        
+        return {
+            "documents": documents,
+            "total_documents": len(documents),
+            "total_chunks": total_vectors
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
 
 
 @app.exception_handler(Exception)
