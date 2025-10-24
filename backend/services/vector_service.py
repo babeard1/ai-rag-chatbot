@@ -32,7 +32,7 @@ class VectorService:
             # Get Index
             self.index = self.pc.Index(settings.pinecone_index_name)
 
-            # Test connectioN
+            # Test connection
             stats = self.index.describe_index_stats()
             logger.info(f"Connected to Pinecone index '{settings.pinecone_index_name}'")
             logger.info(f"Index stats: {stats.get('total_vector_count', 0)} vectors stored")
@@ -43,6 +43,49 @@ class VectorService:
         except Exception as e:
             logger.error(f"Unexpected error connecting to Pinecone: {str(e)}")
             raise
+
+    def upsert_vectors(self, vectors: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Upsert vectors to Pinecone.
+        This method expects vectors in the format used by main.py.
+        
+        Args:
+            vectors: List of dicts with 'id', 'values', and 'metadata'
+            
+        Returns:
+            Dictionary with success status and upserted count
+        """
+        try:
+            if not vectors:
+                return {"success": False, "error": "No vectors provided"}
+            
+            logger.info(f"Upserting {len(vectors)} vectors to Pinecone")
+            
+            # Pinecone expects this format
+            formatted_vectors = []
+            for v in vectors:
+                formatted_vectors.append({
+                    "id": v['id'],
+                    "values": v['values'],
+                    "metadata": v['metadata']
+                })
+            
+            # Upsert to Pinecone
+            response = self.index.upsert(vectors=formatted_vectors)
+            
+            logger.info(f"Successfully upserted {response.upserted_count} vectors")
+            
+            return {
+                "success": True,
+                "upserted_count": response.upserted_count
+            }
+            
+        except PineconeException as e:
+            logger.error(f"Pinecone error upserting vectors: {str(e)}")
+            return {"success": False, "error": f"Pinecone error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Unexpected error upserting vectors: {str(e)}")
+            return {"success": False, "error": f"Upsert error: {str(e)}"}
 
     def store_vector(self, 
                      texts: List[str],
@@ -77,7 +120,7 @@ class VectorService:
                 vector_id = str(uuid.uuid4())
                 vector_ids.append(vector_id)
 
-                # Add text to metadate for retrival
+                # Add text to metadata for retrieval
                 full_metadata = {
                     **metadata,
                     "text": text,
@@ -129,7 +172,7 @@ class VectorService:
             Dictionary with search results and metadata
         """
         try:
-            logger.info(f"Searching for {top_k} similar vectrs")
+            logger.info(f"Searching for {top_k} similar vectors")
 
             # Do similarity search
             search_response = self.index.query(

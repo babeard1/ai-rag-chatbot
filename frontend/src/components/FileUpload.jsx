@@ -172,32 +172,43 @@ const FileUpload = ({ onUploadSuccess }) => {
           <Divider sx={{ my: 1.5, bgcolor: 'white', opacity: 0.3 }} />
           
           <List dense disablePadding>
-            {uploadedFiles.map((file, index) => (
-              <ListItem 
-                key={index}
-                sx={{ 
-                  px: 0,
-                  py: 0.5,
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 32 }}>
-                  <FileIcon sx={{ color: 'white', fontSize: 20 }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary={
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {file.filename || file.name}
-                    </Typography>
-                  }
-                  secondary={
-                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
-                      {file.total_pages ? `${file.total_pages} pages • ` : ''}
-                      {file.total_chunks || file.chunks_created || 'Unknown'} searchable chunks
-                    </Typography>
-                  }
-                />
-              </ListItem>
-            ))}
+            {uploadedFiles
+              .sort((a, b) => {
+                // Natural sort - handles numbers correctly
+                const nameA = (a.filename || a.name || '').toLowerCase();
+                const nameB = (b.filename || b.name || '').toLowerCase();
+                
+                return nameA.localeCompare(nameB, undefined, {
+                  numeric: true,
+                  sensitivity: 'base'
+                });
+              })
+              .map((file, index) => (
+                <ListItem 
+                  key={index}
+                  sx={{ 
+                    px: 0,
+                    py: 0.5,
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <FileIcon sx={{ color: 'white', fontSize: 20 }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {file.filename || file.name}
+                      </Typography>
+                    }
+                    secondary={
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                        {file.total_pages ? `${file.total_pages} pages • ` : ''}
+                        {file.total_chunks || file.chunks_created || 'Unknown'} searchable chunks
+                      </Typography>
+                    }
+                  />
+                </ListItem>
+              ))}
           </List>
         </Paper>
       )}

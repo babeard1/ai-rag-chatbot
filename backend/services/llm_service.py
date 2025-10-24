@@ -105,7 +105,7 @@ class LLMService:
                 "answer": ""
             }
 
-    def _format_context(self, chunks: List[ Dict[str, Any]] ) -> str:
+    def _format_context(self, chunks: List[Dict[str, Any]]) -> str:
         """
         Format context chunks into a readable string for the prompt.
         
@@ -122,10 +122,12 @@ class LLMService:
         for i, chunk in enumerate(chunks, 1):
             text = chunk.get("text", "")
             metadata = chunk.get("metadata", {})
-            filename = metadata.get("filename", "Unknown")
+            
+            # Check for 'source' first, then 'filename' as fallback
+            filename = metadata.get("source") or metadata.get("filename", "Unknown")
             page = metadata.get("page", "Unknown")
 
-           # Format each chunk with source info
+            # Format each chunk with source info
             context_parts.append(
                 f"[Source {i}: {filename}, Page {page}]\n{text}\n"
             )
@@ -175,7 +177,9 @@ class LLMService:
         
         for chunk in chunks:
             metadata = chunk.get("metadata", {})
-            filename = metadata.get("filename", "Unknown")
+            
+            # Check both 'source' and 'filename' fields
+            filename = metadata.get("source") or metadata.get("filename", "Unknown")
             page = metadata.get("page", "Unknown")
             
             # Create unique key to avoid duplicates
@@ -183,9 +187,9 @@ class LLMService:
             
             if source_key not in seen:
                 sources.append({
-                    "filename": filename,
+                    "source": filename,  # Changed from "filename" to "source" for consistency
                     "page": page,
-                    "text_preview": chunk.get("text", "")[:150] + "..."
+                    "text": chunk.get("text", "")[:150] + "..."  # Changed key name to match frontend
                 })
                 seen.add(source_key)
         
